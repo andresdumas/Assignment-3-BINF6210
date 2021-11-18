@@ -49,11 +49,28 @@ source("Entrez_Functions.R") #Load Entrez_Functions.R designed for fetching data
 FetchFastaFiles(searchTerm = "Rana[ORGN] AND COI[GENE] AND 100:1000[SLEN]", seqsPerFile = 200, fastaFileName = "test.COI") #fetching all sequences for COI gene for Rana species, 200 seqs per fasta file
 test.COI <- MergeFastaFiles(filePattern = "test.COI") #merging fasta files generated in previous step into a df
 View(test.COI) #check data
-test.COI$Sequence <- DNAStringSet(test.COI$Sequence) #converting sequences into DNAStringSet from Biostrings
-hist(nchar(test.COI$Sequence)) #fast visualization of distribution of retrieved sequence lengths
-median(nchar(test.COI$Sequence)) #median of retrieved sequence lengths
-names(test.COI$Sequence) <- test.COI$Title #assigning "Title" as names to the sequences
-BrowseSeqs(test.COI$Sequence) #visualizing sequences in browser
+
+##Neil P. -- Take the test.X dataset, generate a histogram for sequence length, report the median, and browse the sequence all in one function so we don't have to repeat code. This reduces the redundancy and hardcoding to make it easier to use other gene with dataframes in the format "variable.<GENE_NAME>"
+qualitycheck <- function (test.GENE, browseseq = F){
+  test_GENE_str <- deparse(substitute(test.GENE))
+  gene_name <- tail(str_split(test_GENE_str, "\\.")[[1]], n=1)
+  gene_hist <- hist(nchar(test.GENE$Sequence),
+                    xlab = "Sequence Length (bp)",
+                    main = paste("Distribution of", gene_name, "Sequence Length"))
+  gene_med <- median(nchar(test.GENE$Sequence))
+  abline(v=gene_med, col="red", lwd=3)
+  text (0,gene_med, paste(gene_med))
+  print (paste("The median sequence length for our", gene_name, "sequences is", gene_med))
+  names(test.GENE$Sequence) <- test.GENE$Title
+  
+  #lets make browsing this sequence an optional parameter
+  if (browseseq==T){
+    BrowseSeqs(DNAStringSet(test.GENE$Sequence))
+  }
+}
+
+qualitycheck(test.COI)
+
 rm(COI_search) #remove unnecessary data
 rm(test.COI) #remove unnecessary data
 
@@ -75,22 +92,18 @@ stringSet.COI <- readDNAStringSet("seqs.COI0.fasta") #converting sequences only 
 
 ##--------Data Exploration and Manipulation
 
-dfCOI <- data.frame(COI_Title = names(stringSet.COI), COI_Sequence = paste(stringSet.COI)) #building a df with COI_Title as first col having the names of the sequences and COI_Sequence as the second col having the sequences as DNAStringSet.
-rm(stringSet.COI) #removing unnecesary data
+df.COI <- data.frame(COI_Title = names(stringSet.COI), Sequence = paste(stringSet.COI)) #building a df with COI_Title as first col having the names of the sequences and COI_Sequence as the second col having the sequences as DNAStringSet.
+#rm(stringSet.COI) #removing unnecesary data
 
-dfCOI$Species_Name <- word(dfCOI$COI_Title, 2L, 3L) #creating new col with only species name
-dfCOI$Identifier_species_name <- word(dfCOI$COI_Title, 1L, 3L) #creating new col with identifier and species name
-length(unique(dfCOI$Species_Name)) #retrieving number of unique species (R: 12 species)
-unique(dfCOI$Species_Name) #viewing list of unique species
+df.COI$Species_Name <- word(df.COI$COI_Title, 2L, 3L) #creating new col with only species name
+df.COI$Title <- word(df.COI$COI_Title, 1L, 3L) #creating new col with identifier and species name
+length(unique(df.COI$Species_Name)) #retrieving number of unique species (R: 12 species)
+unique(df.COI$Species_Name) #viewing list of unique species
 
-dfCOI <- dfCOI[, c("COI_Title", "Identifier_species_name", "COI_Sequence")] #modifying df, droping "Species_name" col
-hist(nchar(dfCOI$COI_Sequence)) #fast visualization of distribution of retrieved sequence lengths
+df.COI <- df.COI[, c("COI_Title", "Title", "Sequence")] #modifying df, droping "Species_name" col
 
-dfCOI$COI_Sequence <- DNAStringSet(dfCOI$COI_Sequence) #converting sequences into DNAStringSet from Biostrings as they were converted into characters in previous steps
-class(dfCOI$COI_Sequence) #verifying class
-
-names(dfCOI$COI_Sequence) <- dfCOI$Identifier_species_name #assigning "Identifier_species_name" as names to the sequences
-BrowseSeqs(dfCOI$COI_Sequence) #visualizing sequences in browser
+##Neil P. -- new function
+qualitycheck(df.COI)
 
 #Sequences have a very similar length, with a good classification of species and no missing data (high quality sequences) so we can go straight to the alignment step
 
@@ -101,9 +114,9 @@ maxiters.COI <- 16 #Using default parameter, variable can be changed easily to t
 gap.open.COI <- -400 #Using default parameter, variable can be changed easily to test different parameters
 
 #ALignment
-dfCOI.alignment <- DNAStringSet(muscle::muscle(dfCOI$COI_Sequence, gapopen = gap.open.COI, maxiters = maxiters.COI), use.names = TRUE) #alignment using muscle algorithm of DNA sequences, max iterations set to 16 and gap open penalty set up to -400
-BrowseSeqs(dfCOI.alignment) #visualizing sequences after alignment in browser
-length(dfCOI.alignment) #Chequing number of sequences
+df.COI.alignment <- DNAStringSet(muscle::muscle(DNAStringSet(df.COI$Sequence), gapopen = gap.open.COI, maxiters = maxiters.COI), use.names = TRUE) #alignment using muscle algorithm of DNA sequences, max iterations set to 16 and gap open penalty set up to -400
+BrowseSeqs(df.COI.alignment) #visualizing sequences after alignment in browser
+length(df.COI.alignment) #Chequing number of sequences
 
 ##--------Sequence CLustering
 
@@ -112,25 +125,20 @@ missing.data.COI <- 0.01
 length.var.COI <- 50
 chosen.model.COI <- "TN93" #using recommended model for COI (Acknowledgment_1)
 clustering.threshold.COI <- 0.1
-clustering.method.COI <- "NJ"
+clustering.method.COI <- "complete"
 
 #Clustering
-dnaBin.COI <- as.DNAbin(dfCOI.alignment) #transforming sequences set into bins for clustering
+dnaBin.COI <- as.DNAbin(df.COI.alignment) #transforming sequences set into bins for clustering
 
 distanceMatrix.COI <- dist.dna(dnaBin.COI, model = chosen.model.COI, as.matrix = TRUE, pairwise.deletion = TRUE) #computing a matrix array of pairwise distances from sequences 
 
 clusters.COI <- IdClusters(distanceMatrix.COI, #grouping sequences into clusters of similarity 
                            method = clustering.method.COI,
                            cutoff = clustering.threshold.COI,
-                           showPlot = TRUE,
+                           showPlot = FALSE,
                            type = "clusters",
                            verbose = TRUE) 
-dend.COI <- IdClusters(distanceMatrix.COI, #creates a tree from a set of sequences
-                           method = clustering.method.COI,
-                           cutoff = clustering.threshold.COI,
-                           showPlot = TRUE,
-                           type = "dendrogram",
-                           verbose = TRUE)  
+
 
 
 #dendrogram object and clusters created, please check visualizations section to generate the respective dendrogram and silhouette plot for the sequences
@@ -144,11 +152,10 @@ CYTB_search #view search results
 FetchFastaFiles(searchTerm = "Rana[ORGN] AND cytb[GENE] AND 100:1000[SLEN]", seqsPerFile = 200, fastaFileName = "test.cytb") #fetching all sequences for CYTB gene for Rana species, 200 seqs per fasta file
 test.CYTB <- MergeFastaFiles(filePattern = "test.cytb") #merging fasta files generated in previous step into a df
 View(test.CYTB) #check data
-test.CYTB$Sequence <- DNAStringSet(test.CYTB$Sequence) #converting sequences into DNAStringSet from Biostrings
-hist(nchar(test.CYTB$Sequence)) #fast visualization of distribution of retrieved sequence lengths
-median(nchar(test.CYTB$Sequence)) #median of retrieved sequence lengths
-names(test.CYTB$Sequence) <- test.CYTB$Title #assigning "Title" as names to the sequences
-BrowseSeqs(test.CYTB$Sequence) #visualizing sequences in browser
+
+##Neil P -- Use our new function for CYTB
+qualitycheck(test.CYTB)
+
 rm(CYTB_search) #remove unnecessary data
 rm(test.CYTB) #remove unnecessary data
 
@@ -171,23 +178,17 @@ stringSet.CYTB <- readDNAStringSet("seqs.cytb0.fasta") #converting sequences onl
 
 ##--------Data Exploration and Manipulation
 
-dfCYTB <- data.frame(CYTB_Title = names(stringSet.CYTB), CYTB_Sequence = paste(stringSet.CYTB)) #building a df with CYTB_Title as first col having the names of the sequences and CYTB_Sequence as the second col having the sequences as DNAStringSet.
+df.CYTB <- data.frame(CYTB_Title = names(stringSet.CYTB), Sequence = paste(stringSet.CYTB)) #building a df with CYTB_Title as first col having the names of the sequences and CYTB_Sequence as the second col having the sequences as DNAStringSet.
 rm(stringSet.CYTB) #removing unnecesary data
 
-dfCYTB$Species_Name <- word(dfCYTB$CYTB_Title, 2L, 3L) #creating new col with only species name
-dfCYTB$Identifier_species_name <- word(dfCYTB$CYTB_Title, 1L, 3L) #creating new col with identifier and species name
-length(unique(dfCYTB$Species_Name)) #Number of unique species (R:10 species)
-unique(dfCYTB$Species_Name) #Unique Species
+df.CYTB$Species_Name <- word(df.CYTB$CYTB_Title, 2L, 3L) #creating new col with only species name
+df.CYTB$Title <- word(df.CYTB$CYTB_Title, 1L, 3L) #creating new col with identifier and species name
+length(unique(df.CYTB$Species_Name)) #Number of unique species (R:10 species)
+unique(df.CYTB$Species_Name) #Unique Species
 
-dfCYTB <- dfCYTB[, c("CYTB_Title", "Identifier_species_name", "CYTB_Sequence")] #modifying df, droping "Species_name" col
+df.CYTB <- df.CYTB[, c("CYTB_Title", "Title", "Sequence")] #modifying df, droping "Species_name" col
 
-hist(nchar(dfCYTB$CYTB_Sequence)) #fast visualization of distribution of retrieved sequence lengths
-
-dfCYTB$CYTB_Sequence <- DNAStringSet(dfCYTB$CYTB_Sequence) #converting sequences into DNAStringSet from Biostrings as they were converted into characters in previous steps
-class(dfCYTB$CYTB_Sequence) #verifying class
-
-names(dfCYTB$CYTB_Sequence) <- dfCYTB$Identifier_species_name #assigning "Identifier_species_name" as names to the sequences
-BrowseSeqs(dfCYTB$CYTB_Sequence) #visualizing sequences in browser
+qualitycheck(df.CYTB)
 
 #Sequences have a very similar length, with a good classification of species and few missing data (high quality sequences) so we can go straight to the alignment step
 
@@ -198,12 +199,12 @@ maxiters.CYTB <- 16 #Using default parameter, variable can be changed easily to 
 gap.open.CYTB <- -400 #Using default parameter, variable can be changed easily to test different parameters
 
 #ALignment
-dfCYTB.alignment <- DNAStringSet(muscle::muscle(dfCYTB$CYTB_Sequence, gapopen = gap.open.CYTB, maxiters = maxiters.CYTB), use.names = TRUE) #alignment using muscle algorithm of DNA sequences, max iterations set to 16 and gap open penalty set up to -400
-BrowseSeqs(dfCYTB.alignment) #visualizing sequences after alignment in browser
-length(dfCOI.alignment) #Chequing number of sequences
+df.CYTB.alignment <- DNAStringSet(muscle::muscle(DNAStringSet(df.CYTB$Sequence), gapopen = gap.open.CYTB, maxiters = maxiters.CYTB), use.names = TRUE) #alignment using muscle algorithm of DNA sequences, max iterations set to 16 and gap open penalty set up to -400
+BrowseSeqs(df.CYTB.alignment) #visualizing sequences after alignment in browser
+length(df.COI.alignment) #Chequing number of sequences
 
-length(dfCYTB.alignment) #How many sequences (rows)
-length(dfCYTB.alignment[[1]]) #Lenght of sequence 1
+length(df.CYTB.alignment) #How many sequences (rows)
+length(df.CYTB.alignment[[1]]) #Lenght of sequence 1
 
 ##--------Sequence CLustering
 
@@ -212,24 +213,19 @@ missing.data.CYTB <- 0.01
 length.var.CYTB <- 50
 chosen.model.CYTB <- "TN93" #using recommended model for COI (Acknowledgment_1)
 clustering.threshold.CYTB <- 0.1
-clustering.method.CYTB <- "NJ"
+clustering.method.CYTB <- "complete"
 #Clustering
-dnaBin.CYTB <- as.DNAbin(dfCYTB.alignment) #transforming sequences set into bins for clustering
+dnaBin.CYTB <- as.DNAbin(df.CYTB.alignment) #transforming sequences set into bins for clustering
 
 distanceMatrix.CYTB <- dist.dna(dnaBin.CYTB, model = chosen.model.CYTB, as.matrix = TRUE, pairwise.deletion = TRUE) #computing a matrix array of pairwise distances from sequences 
 
 clusters.CYTB <- IdClusters(distanceMatrix.CYTB, #grouping sequences into clusters of similarity 
-                           method = clustering.method.CYTB,
-                           cutoff = clustering.threshold.CYTB,
-                           showPlot = TRUE,
-                           type = "clusters",
-                           verbose = TRUE)
-dend.CYTB <- IdClusters(distanceMatrix.CYTB, #creating a tree from the set of sequences
                             method = clustering.method.CYTB,
                             cutoff = clustering.threshold.CYTB,
-                            showPlot = TRUE,
-                            asDendrogram = TRUE,
+                            showPlot = FALSE,
+                            type = "clusters",
                             verbose = TRUE)
+
 
 #dendrogram object and clusters created, please check visualizations section to generate the respective dendrogram and silhouette plot for the sequences
 
@@ -237,54 +233,100 @@ dend.CYTB <- IdClusters(distanceMatrix.CYTB, #creating a tree from the set of se
 
 ##--------Histograms of sequence lengths for COI and CYTB genes, median plotted as a red line
 par(mfrow=c(1,2)) #Merge two plots in 1 row by 2cols
-hist(nchar(dfCOI$COI_Sequence), #Histogram using base R, delimiting y axis
+hist(nchar(df.COI$Sequence), #Histogram using base R, delimiting y axis
      main="COI gene", 
      xlab="Sequence length (bp)", 
      border="black",
      ylim = c(0,200),
      col="darkred")
-abline(v = median(nchar(dfCOI$COI_Sequence)), # Add line for median
+abline(v = median(nchar(df.COI$Sequence)), # Add line for median
        col = "red",
        lwd = 3)
-hist(nchar(dfCYTB$CYTB_Sequence), #Histogram using base R, delimiting y axis
+hist(nchar(df.CYTB$Sequence), #Histogram using base R, delimiting y axis
      main="CYTB gene", 
      xlab="Sequence length (bp)", 
      border="black",
      ylim = c(0,200),
      col="darkred")
-abline(v = median(nchar(dfCYTB$CYTB_Sequence)), # Add line for median
+abline(v = median(nchar(df.CYTB$Sequence)), # Add line for median
        col = "red",
        lwd = 3)
 par(mfrow=c(1,1)) #reseting par for future plots
 
 #Generating 1 image with two plots
 
+
+#Neil P. -- We will use fviz_dend instead of IdClusters() to generate our dendrograms.This function gives us more freedom to adjust our dendrogram. For example, let's remove the labels and colour code the dendrogram so we can still visualize any patterns while still having it look neat. The goal here is to improve the dendrogram figures to make it fit for a publication. Note: "complete" is the clustering method used, not NJ, due to the clustering method limitations on fviz_dend.Our silhouette plots will reflect this same method as well.
+
+
+#Form clusters for our dendrogram
+COI.cut <- hcut(distanceMatrix.COI, k = 11, hc_method = "complete")
+
+#Now we can plot our dendrogram. To add to our colour coordination, lets use filled rectangles to group the tips by cluster.
+dend.COI <-fviz_dend(COI.cut, show_labels = FALSE, rect = T,palette="Paired",
+                     lower_rect=-0.1, main = "Dendrogram of COI clusters, k=11", rect_fill =T,
+                     rect_border= "Paired")
+
+
+#And the same for CYTB
+CYTB.cut <- hcut(distanceMatrix.CYTB, k = 12, hc_method = "complete")
+dend.CYTB <- fviz_dend(CYTB.cut, show_labels = FALSE, rect = T,palette="Paired",
+                       lower_rect=-0.1, main = "Dendrogram of CYTB clusters, k=12", rect_fill =T,
+                       rect_border= "Paired")
+#Neil P. -- values like cluster size are hard-coded, but the function below will fix this
+
+plot(dend.COI)
+plot(dend.CYTB)
+
 ##--------Silhouette plots of clusters formed using COI and CYTB genes
 #COI Silhouette plot
 
-sil.COI <- silhouette(clusters.COI$cluster,distanceMatrix.COI) #computing silhouette information based on clusters for COI
-sil.CYTB <- silhouette(clusters.CYTB$cluster,distanceMatrix.CYTB) #computing silhouette information based on clusters for CYTB
+#Neil P. -- Lets create function that generates dendrogram AND silhouette plot for a given gene. Our plots will even have appropriate titles based on the arguments. This edit both reduces code redundancy AND produces meaningful figures, as we can generate two related plots for a single gene with one function. We will specify the gene name as a string, and provide the cluster and distance matrix variable
 
-p.sil.COI <- fviz_silhouette(sil.COI, palette = "Paired", title = "COI gene (average silhouette width: 0.91)") #using fviz to pass sil.obj generated in previous step for visualziation
-p.sil.CYTB <- fviz_silhouette(sil.CYTB, palette = "Paired", title = "CYTB gene (average silhouette width: 0.70)") #using fviz to pass sil.obj generated in previous step for visualziation
-ggpubr::ggarrange(p.sil.COI,p.sil.CYTB) #merging two plots
-gridExtra::grid.arrange(p.sil.COI,p.sil.CYTB) #rearranging as 1 col 2 rows
+#First lets remove the plot variables. These will be restored later with our function
+rm(dend.COI)
+rm(dend.CYTB)
 
-#Generating 1 image with two plots
 
-##--------Dendrograms calculated using genetic distances between sequences for COI and CYTB genes
+#Create our plotting function
+plot_sil_dend <- function(gene_name, clusters, distmatrix){
+  
+  ##First generate our silhouette plot. Create silhouette variable and specify title
+  sil.GENE <- silhouette(clusters$cluster,distmatrix)
+  avg.width <- round(mean(sil.GENE[,3]),2)
+  silplot_title <- paste0(gene_name, " gene (average silhouette width:", avg.width, ")")
+  #This code generates our silhouette plot
+  p.sil.GENE <- fviz_silhouette(sil.GENE, palette = "Paired", title = silplot_title)
+  #Here, we want to save our plot in the global environment, we can do so with assign()
+  var_name <- paste0("p.sil.",gene_name)
+  print (paste("Silhouette plot stored as",var_name))
+  assign(var_name, p.sil.GENE, envir=.GlobalEnv)
+  
+  ###Generate a dendrogram given the arguments, and specify title
+  k.GENE <- length(unique(clusters$cluster))
+  GENE.cut <- hcut(distmatrix, k = k.GENE, hc_method = "complete")
+  dend_title <- paste0("Dendrogram of COI clusters, k=", k.GENE)
+  dend.GENE <- fviz_dend(GENE.cut, show_labels = FALSE, rect = T, palette="Paired",
+                         lower_rect=-0.1, main = dend_title, rect_fill =T,
+                         rect_border= "Paired")
+  #Again, save our dendrogem in the global environment
+  var_name2 <- paste0("dend.", gene_name)
+  print (paste("Dendrogram stored as",var_name))
+  assign(var_name2, dend.GENE, envir=.GlobalEnv)
+  
+  #This will allow us to plot both the dendrogram and silhouette. Due to the same palette used, the clusters are colour coordinated between plots!
+  ggpubr::ggarrange(dend.GENE,p.sil.GENE)
+  gridExtra::grid.arrange(dend.GENE,p.sil.GENE)
+}
 
-nodePar <- list(lab.cex = 0.4, pch = c(NA, 19), 
-                cex = 0.4, col = "blue") #Creating blue dots at the end of leaves and setting dots size and labels size
 
-png("dendro.COI.png", width = 20, height = 15, units = 'in', res = 300) #generating a png file with specified width, height and resolution
-plot(dend.COI,
-     nodePar = nodePar, horiz = TRUE) #ploting dendrogram for COI
-dev.off()
+#Take a look
+plot_sil_dend("COI", clusters.COI, distanceMatrix.COI)
+plot_sil_dend("CYTB", clusters.CYTB, distanceMatrix.CYTB)
+#There is a lot of information on these plots, so it is best to view these full screen
 
-png("dendro.CYTB.png", width = 20, height = 15, units = 'in', res = 300) #generating a png file with specified width, height and resolution
-plot(dend.CYTB,
-     nodePar = nodePar, horiz = TRUE) # #ploting dendrogram for COI
-dev.off()
-
-#Generating 1 image for each plot, images exported to be able to differentiate labels
+#Also, now the plots are in our global environment if you want to view individually, without having to run the function again.
+plot(dend.COI)
+plot(p.sil.COI)
+plot(dend.CYTB)
+plot(p.sil.CYTB)
